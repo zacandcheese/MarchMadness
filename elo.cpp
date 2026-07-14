@@ -12,20 +12,10 @@ namespace fs = std::filesystem;
 struct Game {
     int team_id;
     long long game_id;
-    std::string date;
-    std::string home_away;
-    std::string opponent;
     int opp_id;
     std::string result;
-    std::string score;
-    std::string url;
 };
 
-
-struct Team {
-    int team_id;
-    long long elo = 1400;
-};
 
 // Splits one CSV line into fields, honoring double-quoted fields that may contain commas
 // (schedule.csv dates look like "Mon, Nov 4").
@@ -50,19 +40,25 @@ static std::vector<std::string> parseCsvLine(const std::string& line) {
 // team_id,game_id,date,home_away,opponent,opp_id,result,score,game_url
 static bool parseGame(const std::vector<std::string>& f, Game& g) {
     if (f.size() < 9) return false;
-    try {
-        g.team_id = std::stoi(f[0]);
-        g.game_id = std::stoll(f[1]);
-    } catch (...) {
-        return false;
+    int idx = 0;
+    int team_id;
+    std::errc ec = std::from_chars(f[idx].data(), f[idx].data() + f[idx].size(), team_id).ec;
+    if (ec != std::errc()) {
+        return false; // malformed field — bail like your current catch block does
     }
-    g.date = f[2];
-    g.home_away = f[3];
-    g.opponent = f[4];
+    g.team_id = team_id;
+
+    idx = 1;
+    int game_id;
+    ec = std::from_chars(f[idx].data(), f[idx].data() + f[idx].size(), game_id).ec;
+    if (ec != std::errc()) {
+        return false; // malformed field — bail like your current catch block does
+    }
+    g.game_id = game_id;
+
     g.opp_id = f[5].empty() ? -1 : std::stoi(f[5]);
+
     g.result = f[6];
-    g.score = f[7];
-    g.url = f[8];
     return true;
 }
 
@@ -71,6 +67,7 @@ static bool parseGame(const std::vector<std::string>& f, Game& g) {
 // so games.size() here is ~2x the number of distinct games played.
 std::vector<Game> loadSchedules(const std::string& dataRoot, const std::vector<int>& years) {
     std::vector<Game> games;
+    games.reserve(20000); //headroom
     fs::path espnRoot = fs::path(dataRoot) / "espn";
 
     for (const auto& teamDir : fs::directory_iterator(espnRoot)) {
@@ -94,52 +91,60 @@ std::vector<Game> loadSchedules(const std::string& dataRoot, const std::vector<i
     return games;
 }
 
-bool comp (Game x, Game y){
+bool comp (const Game& x, const Game& y){
     return x.game_id > y.game_id;
 }
 
-bool compEq(Game x, Game y){
+bool compEq(const Game& x,const Game& y){
     return x.game_id == y.game_id;
 }
 
-int play(Game g, std::unordered_map<int, int> &teams, int K_factor = 16){
+template<int K_FACTOR>
+int play(const Game& g, std::unordered_map<int, int> &teams){
     int BASE_RANK = 1400;
-    teams.try_emplace(g.team_id, BASE_RANK);
-    teams.try_emplace(g.opp_id, BASE_RANK);
+    int Ra = (teams.try_emplace(g.team_id, BASE_RANK)).first->second;
+    int Rb = (teams.try_emplace(g.opp_id, BASE_RANK)).first->second;
 
-    int Ra = teams[g.team_id];
-    int Rb = teams[g.opp_id];
     float Ea = 1 / (1 + std::pow(10, ((Rb - Ra)/400.0)));
-    float Eb = 1 / (1 + std::pow(10, ((Ra - Rb)/400.0)));
+    float Eb = 1  - Ea;
 
     int Sa = (g.result == "W") ? 1: 0;
 
-    teams[g.team_id] = Ra + K_factor * (Sa - Ea);
-    teams[g.opp_id] = Rb + K_factor * ((1-Sa) - Eb);
+    teams[g.team_id] = Ra + K_FACTOR * (Sa - Ea);
+    teams[g.opp_id] = Rb + K_FACTOR * ((1-Sa) - Eb);
 
     return (Ra > Rb)? Sa : 1-Sa;
+}
+
+template<int K_FACTOR>
+void runBacktest(const std::vector<Game>& games) {
+    std::unordered_map<int, int> teams;
+    float wins = 0;
+    int cnt = 0;
+    for (const auto& g: games){
+        int win = play<K_FACTOR>(g, teams);
+        wins += win;
+        cnt += 1.0;
+    }
+    std::cout << wins / cnt << "\n";
 }
 
 
 int main() {
     std::vector<int> years = {2024};
+    auto t0 = std::chrono::steady_clock::now();
     std::vector<Game> games = loadSchedules("data", years);
+    auto t1 = std::chrono::steady_clock::now();
+    std::chrono::duration<double, std::milli> ms = t1 - t0;
     std::cout << "Loaded " << games.size() << " schedule rows\n";
+    std::cout << "Load Time " << ms.count() << "\n";
     // sort the games
     sort(games.begin(), games.end(), comp);
     auto it = unique(games.begin(), games.end(), compEq);
     games.erase(it, games.end());
     
-    std::unordered_map<int, int> teams;
-
-    float wins = 0;
-    int cnt = 0;
-    for (const auto& g: games){
-        int win = play(g, teams);
-        wins += win;
-        cnt += 1.0;
-        if (cnt % 100 == 0) {
-            std::cout << wins / cnt << "\n";
-        }
-    }
+    runBacktest<16>(games);
+    auto t2 = std::chrono::steady_clock::now();
+    ms = t2 - t1;
+    std::cout << "Run Time " << ms.count() << "\n";
 }

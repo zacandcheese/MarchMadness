@@ -72,3 +72,36 @@ This is what actually reads as "quant" to reviewers — more than model sophisti
 
 ## Run Me
 g++ -std=c++17 -O2 -Wall -o /tmp/claude-1000/-home-znowak-MarchMadness/e21d0c38-c832-4dc5-b7ee-de4952276681/scratchpad/elo elo.cpp && /tmp/claude-1000/-home-znowak-MarchMadness/e21d0c38-c832-4dc5-b7ee-de4952276681/scratchpad/elo
+
+### ELO
+1. basic 
+Load time: 48
+Run time: 57
+2. improvements reducing copies of games `const Game&`
+Load time: 47
+Run time: 13
+3. redundant pow calls
+Load time: 47
+Run time: 12.7
+
+4. double hashing per game and unordered_map
+Load time: 47
+Run time: 12
+
+5. exceptions used for parse control flow
+Load time: 40
+Run time: 9.5
+
+6. reserve to reduce church of pushback
+Load time: 37
+Run time: 9.5
+
+7. mixes hot and gold data
+Load time: 33
+Run time: 4.6
+
+
+#### templates
+8. template for K_FACTOR
+Load time: 34.7
+Run time: 5.5
